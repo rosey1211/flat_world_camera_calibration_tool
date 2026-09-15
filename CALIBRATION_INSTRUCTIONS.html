@@ -1,0 +1,669 @@
+<title>Flat-World Camera Calibration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg:     #F1F5F9;
+    --surf:   #FFFFFF;
+    --card:   #FFFFFF;
+    --border: #D0DAE8;
+    --txt:    #1E293B;
+    --muted:  #64748B;
+    --accent: #0D8C66;
+    --code-bg:#EEF2F9;
+    --tag-bg: #E2EBF5;
+    --cam:    #2563EB;
+    --ground: #C27A0E;
+    --vec:    #7C3AED;
+    --warn:   #B45309;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:     #0D1117;
+      --surf:   #151B26;
+      --card:   #1E2A3D;
+      --border: #2A3547;
+      --txt:    #CBD5E1;
+      --muted:  #64748B;
+      --accent: #3DBA8C;
+      --code-bg:#111822;
+      --tag-bg: #1E2A3D;
+      --cam:    #4A90E2;
+      --ground: #E8A838;
+      --vec:    #9B6BD4;
+      --warn:   #FBBF24;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:     #0D1117; --surf: #151B26; --card: #1E2A3D;
+    --border: #2A3547; --txt: #CBD5E1;  --muted: #64748B;
+    --accent: #3DBA8C; --code-bg: #111822; --tag-bg: #1E2A3D;
+    --cam: #4A90E2; --ground: #E8A838; --vec: #9B6BD4; --warn: #FBBF24;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px; line-height: 1.7;
+    background: var(--bg); color: var(--txt); margin: 0;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 52px 24px 80px; }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
+  }
+  h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: clamp(20px,4vw,30px); font-weight: 600;
+    line-height: 1.2; text-wrap: balance; margin: 0 0 10px;
+  }
+  .subtitle { color: var(--muted); font-size: 15px; margin: 0 0 40px; max-width: 62ch; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+  h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 16px; font-weight: 600; margin: 48px 0 6px;
+  }
+  h2 .num { color: var(--accent); margin-right: 6px; }
+  p { margin: 0 0 14px; max-width: 70ch; }
+
+  figure {
+    margin: 24px 0 32px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .fig-body { padding: 28px 24px 20px; overflow-x: auto; display: flex; justify-content: center; }
+  figcaption {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+    color: var(--muted); padding: 10px 24px 12px;
+    border-top: 1px solid var(--border); background: var(--surf);
+  }
+  figcaption strong { color: var(--txt); }
+
+  code {
+    font-family: 'IBM Plex Mono', monospace; font-size: 12.5px;
+    background: var(--code-bg); padding: 1px 6px; border-radius: 3px;
+  }
+  pre {
+    font-family: 'IBM Plex Mono', monospace; font-size: 12.5px;
+    background: var(--code-bg); padding: 14px 16px; border-radius: 7px;
+    overflow-x: auto; margin: 0 0 16px; line-height: 1.7; max-width: 70ch;
+  }
+
+  .step-list { list-style: none; padding: 0; margin: 16px 0; }
+  .step-list li {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 12px;
+    margin: 0 0 18px;
+    align-items: start;
+  }
+  .step-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px; font-weight: 600;
+    background: var(--accent); color: #fff;
+    border-radius: 50%; width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 2px;
+  }
+  .step-body { padding-top: 3px; max-width: 64ch; }
+
+  .note {
+    background: var(--tag-bg);
+    border-left: 3px solid var(--warn);
+    border-radius: 0 6px 6px 0;
+    padding: 10px 14px; font-size: 13px;
+    color: var(--muted); margin: 0 0 16px; max-width: 70ch;
+  }
+  .note strong { color: var(--txt); }
+
+  .formula {
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+    background: var(--code-bg); padding: 14px 18px;
+    border-radius: 7px; line-height: 2.0;
+    margin: 12px 0 16px; overflow-x: auto; max-width: 64ch;
+  }
+  .f-angle { color: var(--vec); }
+  .f-val   { color: var(--ground); }
+
+  svg text { font-family: 'IBM Plex Mono', monospace; }
+</style>
+
+<div class="page">
+
+  <p class="eyebrow">flat_world_camera_calibration_tool</p>
+  <h1>Flat-World Camera Calibration</h1>
+  <p class="subtitle">How to determine camera pitch, roll, height, and position offsets for unprojecting image pixels onto a flat ground plane.</p>
+  <hr>
+
+  <!-- ── OVERVIEW ─────────────────────────────────────── -->
+  <h2><span class="num">1.</span>What You Are Calibrating</h2>
+  <p>To convert a pixel in the camera image to a point on the ground, you need five parameters. Three are measured physically with a tape measure; two are computed interactively using the tool.</p>
+
+  <figure>
+    <div class="fig-body">
+      <canvas id="overview-canvas" width="700" height="160"></canvas>
+    </div>
+    <figcaption><strong>Figure 1.</strong> The five calibration parameters. Blue = measured with tape; teal = computed interactively.</figcaption>
+  </figure>
+
+  <!-- ── PHYSICAL SETUP ───────────────────────────────── -->
+  <h2><span class="num">2.</span>Physical Setup</h2>
+  <p>Park the vehicle on flat, level ground. You need two pieces of equipment placed on the ground in front of the camera.</p>
+
+  <figure>
+    <div class="fig-body">
+      <canvas id="topview-canvas" width="620" height="340"></canvas>
+    </div>
+    <figcaption><strong>Figure 2.</strong> Top-view of the physical setup. The ground mark sits on the vehicle centreline at distance D. The tape measure is perpendicular to the centreline at the same distance D.</figcaption>
+  </figure>
+
+  <ol class="step-list">
+    <li>
+      <span class="step-num">1</span>
+      <div class="step-body"><strong>Measure camera height.</strong> With a tape measure, find the vertical distance from the ground to the camera's optical centre (front of lens). Record this as <code>camera_height_m</code> in <code>calibration_config.yaml</code>.</div>
+    </li>
+    <li>
+      <span class="step-num">2</span>
+      <div class="step-body"><strong>Choose a mark distance D.</strong> Pick a distance that falls within the camera's field of view. 3–5 m typically works well. Record this as <code>mark_distance_m</code>.</div>
+    </li>
+    <li>
+      <span class="step-num">3</span>
+      <div class="step-body"><strong>Place the ground mark.</strong> Set a clearly visible object (cone, tape X, painted dot) on the ground at distance D <em>directly ahead</em> of the camera, on the vehicle centreline. Use a tape measure from directly below the camera to the mark.</div>
+    </li>
+    <li>
+      <span class="step-num">4</span>
+      <div class="step-body"><strong>(Optional) Place the roll tape.</strong> Stretch a tape measure on the ground, perpendicular to the vehicle, centred on the centreline, at the same distance D. The tape should be at least 1–2 m wide and clearly visible. Record its width as <code>tape_width_m</code>.</div>
+    </li>
+    <li>
+      <span class="step-num">5</span>
+      <div class="step-body"><strong>Capture a calibration image.</strong> With everything in place, save a single frame from the camera to disk (e.g. using <code>ros2 run image_view image_saver</code> or any image-capture tool). This is the image you will load into the calibration tool.</div>
+    </li>
+  </ol>
+
+  <div class="note"><strong>Important:</strong> the vehicle must be stationary and on flat, level ground while you capture the image. Any pitch of the vehicle body relative to the ground will appear as additional camera pitch and must be accounted for — ideally calibrate on the surface the vehicle typically operates on.</div>
+
+  <!-- ── PITCH GEOMETRY ────────────────────────────────── -->
+  <h2><span class="num">3.</span>Pitch — The Geometry</h2>
+  <p>The side view shows how clicking the ground mark determines the camera pitch angle θ.</p>
+
+  <figure>
+    <div class="fig-body">
+      <canvas id="sideview-canvas" width="620" height="300"></canvas>
+    </div>
+    <figcaption><strong>Figure 3.</strong> Side-view geometry. The two angles combine to give the camera pitch: the ray angle below the optical axis (from the clicked pixel) and the elevation angle from horizontal to the mark.</figcaption>
+  </figure>
+
+  <p>The math behind the computation:</p>
+  <div class="formula">
+    <span class="f-angle">α</span> = atan( (<span class="f-val">v_click</span> − cy) / fy )
+    &nbsp;&nbsp;← angle of clicked ray below optical axis<br>
+    <span class="f-angle">β</span> = atan( <span class="f-val">h</span> / <span class="f-val">D</span> )
+    &nbsp;&nbsp;← elevation angle to mark below horizontal<br>
+    <span class="f-angle">θ</span> = <span class="f-angle">β</span> − <span class="f-angle">α</span>
+    &nbsp;&nbsp;← camera pitch (positive = tilted downward)
+  </div>
+
+  <p>If the mark appears <em>above</em> the image centre (v_click &lt; cy), α is negative and the computed pitch is larger — this means the camera is tilted down more than the angle to the mark alone would suggest.</p>
+
+  <!-- ── ROLL GEOMETRY ─────────────────────────────────── -->
+  <h2><span class="num">4.</span>Roll — The Geometry</h2>
+  <p>Without roll, two points at the same ground distance D (but different lateral positions) project to the same image row v. Any roll tilts this horizontal alignment, producing a slope in the image.</p>
+
+  <figure>
+    <div class="fig-body">
+      <canvas id="rollview-canvas" width="560" height="220"></canvas>
+    </div>
+    <figcaption><strong>Figure 4.</strong> With zero roll (left), the tape ends project to the same image row. With roll (right), the tape endpoints have different v values — the slope gives the roll angle.</figcaption>
+  </figure>
+
+  <div class="formula">
+    <span class="f-angle">φ</span> = atan2( v_right − v_left, u_right − u_left )
+    &nbsp;&nbsp;← camera roll (positive = clockwise, right side down)
+  </div>
+
+  <!-- ── USING THE TOOL ────────────────────────────────── -->
+  <h2><span class="num">5.</span>Using the Tool</h2>
+
+  <ol class="step-list">
+    <li>
+      <span class="step-num">1</span>
+      <div class="step-body"><strong>Edit the config.</strong> Fill in <code>calibration_config.yaml</code> with the image path, intrinsics path, measured height, mark distance, tape width, and vehicle offsets.</div>
+    </li>
+    <li>
+      <span class="step-num">2</span>
+      <div class="step-body"><strong>Launch the tool.</strong>
+        <pre>cd flat_world_camera_calibration_tool
+python flat_world_calibrate.py</pre>
+      </div>
+    </li>
+    <li>
+      <span class="step-num">3</span>
+      <div class="step-body"><strong>Calibrate pitch.</strong> Press <code>p</code> to enter pitch mode. Click precisely on the centre of the ground mark in the image. The computed pitch appears in the status bar immediately.</div>
+    </li>
+    <li>
+      <span class="step-num">4</span>
+      <div class="step-body"><strong>Calibrate roll (optional).</strong> Press <code>r</code>. Click the left end of the tape, then the right end. Roll is computed automatically.</div>
+    </li>
+    <li>
+      <span class="step-num">5</span>
+      <div class="step-body"><strong>Verify with the grid.</strong> Press <code>g</code> to show a projected ground grid. Each grid point shows where the corresponding real-world distance and lateral position <em>should</em> appear in the image. The highlighted dot at (D, 0) should land exactly on your ground mark.</div>
+    </li>
+    <li>
+      <span class="step-num">6</span>
+      <div class="step-body"><strong>Save.</strong> Press <code>s</code>. The tool writes <code>flat_world_extrinsic.yaml</code> with all five parameters.</div>
+    </li>
+  </ol>
+
+  <!-- ── OUTPUT ────────────────────────────────────────── -->
+  <h2><span class="num">6.</span>Output File</h2>
+  <p><code>flat_world_extrinsic.yaml</code> contains everything needed by the road centerline node to unproject image pixels onto the ground plane:</p>
+  <pre>camera_height_m:   1.2000   # tape-measured
+camera_pitch_deg:  15.3420  # computed from pitch click
+camera_roll_deg:    0.2100  # computed from tape clicks
+camera_x_offset_m:  0.5000  # entered in config
+camera_y_offset_m:  0.0000  # entered in config</pre>
+
+  <!-- ── KEYBOARD REF ───────────────────────────────────── -->
+  <h2><span class="num">7.</span>Keyboard Reference</h2>
+  <figure>
+    <div class="fig-body" style="justify-content:flex-start; padding:20px 28px;">
+      <table style="border-collapse:collapse;font-size:13px;width:100%;">
+        <thead>
+          <tr>
+            <th style="text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:0 24px 8px 0;border-bottom:1px solid var(--border);">Key</th>
+            <th style="text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:0 0 8px;border-bottom:1px solid var(--border);">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);padding:8px 24px 8px 0;border-bottom:1px solid var(--border);">p</td><td style="padding:8px 0;border-bottom:1px solid var(--border);">Pitch mode — next click sets the ground mark</td></tr>
+          <tr><td style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);padding:8px 24px 8px 0;border-bottom:1px solid var(--border);">r</td><td style="padding:8px 0;border-bottom:1px solid var(--border);">Roll mode — click left tape end, then right tape end</td></tr>
+          <tr><td style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);padding:8px 24px 8px 0;border-bottom:1px solid var(--border);">g</td><td style="padding:8px 0;border-bottom:1px solid var(--border);">Toggle ground verification grid overlay</td></tr>
+          <tr><td style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);padding:8px 24px 8px 0;border-bottom:1px solid var(--border);">u</td><td style="padding:8px 0;border-bottom:1px solid var(--border);">Toggle lens undistortion (requires distortion coefficients in intrinsics)</td></tr>
+          <tr><td style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);padding:8px 24px 8px 0;border-bottom:1px solid var(--border);">s</td><td style="padding:8px 0;border-bottom:1px solid var(--border);">Save calibration to flat_world_extrinsic.yaml</td></tr>
+          <tr><td style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);padding:8px 24px 8px 0;">q / Esc</td><td style="padding:8px 0;">Quit</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption><strong>Figure 5.</strong> All keyboard controls.</figcaption>
+  </figure>
+
+</div>
+
+<script>
+function isDark() {
+  const dt = document.documentElement.getAttribute('data-theme');
+  if (dt === 'dark') return true;
+  if (dt === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function tok() {
+  const dk = isDark();
+  return {
+    bg:     dk ? '#1E2A3D' : '#FFFFFF',
+    txt:    dk ? '#CBD5E1' : '#1E293B',
+    muted:  dk ? '#64748B' : '#94A3B8',
+    border: dk ? '#2A3547' : '#D0DAE8',
+    accent: dk ? '#3DBA8C' : '#0D8C66',
+    cam:    dk ? '#4A90E2' : '#2563EB',
+    ground: dk ? '#E8A838' : '#C27A0E',
+    vec:    dk ? '#9B6BD4' : '#7C3AED',
+    veh:    dk ? '#334155' : '#CBD5E1',
+    veh2:   dk ? '#475569' : '#94A3B8',
+  };
+}
+
+function dpr(canvas) {
+  const r = window.devicePixelRatio || 1;
+  const w = canvas.width, h = canvas.height;
+  canvas.width  = w * r;
+  canvas.height = h * r;
+  canvas.style.width  = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(r, r);
+  return [ctx, w, h];
+}
+
+// ── Figure 1: Parameter overview ─────────────────────────────────────────────
+function drawOverview() {
+  const [ctx, W, H] = dpr(document.getElementById('overview-canvas'));
+  const C = tok();
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+
+  const params = [
+    { label: 'camera_height_m',   sub: 'tape measure',     color: C.cam,    x: 30  },
+    { label: 'camera_pitch_deg',  sub: 'click ground mark',color: C.accent, x: 185 },
+    { label: 'camera_roll_deg',   sub: 'click tape ends',  color: C.accent, x: 340 },
+    { label: 'camera_x_offset_m', sub: 'tape measure',     color: C.cam,    x: 495 },
+    { label: 'camera_y_offset_m', sub: 'tape measure',     color: C.cam,    x: 590 },
+  ];
+
+  // Adjust last two to share space
+  const items = [
+    { label: 'camera_height_m',   sub: 'tape measure',      color: C.cam,    x: 20,  w: 120 },
+    { label: 'camera_pitch_deg',  sub: 'click ground mark', color: C.accent, x: 160, w: 140 },
+    { label: 'camera_roll_deg',   sub: 'click tape ends',   color: C.accent, x: 320, w: 130 },
+    { label: 'camera_x_offset_m', sub: 'tape measure',      color: C.cam,    x: 470, w: 110 },
+    { label: 'camera_y_offset_m', sub: 'tape measure',      color: C.cam,    x: 590, w: 110 },
+  ];
+
+  items.forEach(({ label, sub, color, x, w }) => {
+    // Box
+    const bx = x, by = 30, bh = 90;
+    ctx.fillStyle = color + '18';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, w, bh, 6);
+    ctx.fill(); ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = color;
+    ctx.font = `500 10.5px 'IBM Plex Mono', monospace`;
+    // Break label at underscore boundaries
+    const parts = label.split('_');
+    const line1 = parts.slice(0,2).join('_');
+    const line2 = parts.slice(2).join('_');
+    ctx.fillText(line1, bx + w/2, by + 28);
+    if (line2) ctx.fillText(line2, bx + w/2, by + 44);
+
+    // Sub-label
+    ctx.fillStyle = C.muted;
+    ctx.font = `400 9px 'IBM Plex Mono', monospace`;
+    ctx.fillText(sub, bx + w/2, by + bh - 10);
+
+    // Method dot
+    const dotColor = color === C.cam ? C.cam : C.accent;
+    ctx.fillStyle = dotColor;
+    ctx.beginPath();
+    ctx.arc(bx + w/2, by + bh - 22, 4, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // Legend
+  const lx = 20, ly = H - 14;
+  ctx.fillStyle = C.cam; ctx.beginPath(); ctx.arc(lx, ly, 5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = C.muted; ctx.font = `400 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'left';
+  ctx.fillText('measured with tape', lx + 10, ly + 4);
+
+  const lx2 = 200;
+  ctx.fillStyle = C.accent; ctx.beginPath(); ctx.arc(lx2, ly, 5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = C.muted;
+  ctx.fillText('computed interactively', lx2 + 10, ly + 4);
+}
+
+// ── Figure 2: Top view ───────────────────────────────────────────────────────
+function drawTopView() {
+  const [ctx, W, H] = dpr(document.getElementById('topview-canvas'));
+  const C = tok();
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+
+  const vx = W/2, vy = H - 60;  // vehicle rear centre
+  const scl = 45;  // px per metre
+
+  // Ground
+  ctx.fillStyle = isDark() ? '#1a2620' : '#f0f7ee';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, H-30, W, 30);
+
+  // Grid lines (faint)
+  ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+  for (let d = 1; d <= 6; d++) {
+    const y = vy - d * scl;
+    ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W-40, y); ctx.stroke();
+    ctx.fillStyle = C.muted; ctx.font = `400 9px 'IBM Plex Mono', monospace`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`${d} m`, 36, y + 4);
+  }
+
+  // Centreline (dashed)
+  ctx.setLineDash([6, 5]);
+  ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(vx, vy - 10); ctx.lineTo(vx, 20); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Tape measure at D=3
+  const D = 3;
+  const ty = vy - D * scl;
+  const tW = 2 * scl;  // 2 m tape, scaled
+  ctx.strokeStyle = C.ground; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(vx - tW, ty); ctx.lineTo(vx + tW, ty); ctx.stroke();
+  // Tape end markers
+  [-tW, tW].forEach(dx => {
+    ctx.fillStyle = C.ground;
+    ctx.beginPath(); ctx.arc(vx + dx, ty, 5, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.fillStyle = C.ground; ctx.font = `500 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('tape measure (roll calibration)', vx, ty - 10);
+  ctx.fillText('2 m', vx - tW - 22, ty + 4);
+  ctx.fillText('2 m', vx + tW + 22, ty + 4);
+  // D arrow
+  ctx.strokeStyle = C.ground; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(vx + tW + 36, vy); ctx.lineTo(vx + tW + 36, ty); ctx.stroke();
+  ctx.fillStyle = C.ground;
+  ctx.font = `500 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'left';
+  ctx.fillText('D = 3 m', vx + tW + 40, (vy + ty)/2 + 4);
+
+  // Ground mark
+  const mx = vx, my = ty;
+  ctx.fillStyle = C.accent;
+  ctx.beginPath();
+  ctx.moveTo(mx, my - 10); ctx.lineTo(mx - 8, my + 6); ctx.lineTo(mx + 8, my + 6);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = C.accent; ctx.font = `500 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'left';
+  ctx.fillText('ground mark', mx + 12, my + 4);
+
+  // Vehicle body
+  const vw = 45, vh = 80;
+  ctx.fillStyle = C.veh;
+  ctx.beginPath();
+  ctx.roundRect(vx - vw/2, vy - vh, vw, vh, 6);
+  ctx.fill();
+  ctx.strokeStyle = C.veh2; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Camera position
+  const camY = vy - vh + 14;
+  ctx.fillStyle = C.cam;
+  ctx.beginPath(); ctx.arc(vx, camY, 5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = C.cam; ctx.font = `500 9.5px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillText('camera', vx - 10, camY + 4);
+
+  // FOV lines from camera to tape ends
+  ctx.strokeStyle = C.cam + '55'; ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(vx, camY); ctx.lineTo(vx - tW, ty); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(vx, camY); ctx.lineTo(vx + tW, ty); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Labels
+  ctx.fillStyle = C.muted; ctx.font = `400 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('VEHICLE (top view)', vx, H - 6);
+  ctx.fillText('← vehicle centreline', vx + 90, vy - D/2 * scl);
+}
+
+// ── Figure 3: Side view ──────────────────────────────────────────────────────
+function drawSideView() {
+  const [ctx, W, H] = dpr(document.getElementById('sideview-canvas'));
+  const C = tok();
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+
+  // Ground line
+  const gy = H - 60;
+  ctx.strokeStyle = C.ground + '80'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(20, gy); ctx.lineTo(W - 20, gy); ctx.stroke();
+  ctx.fillStyle = C.ground + '30';
+  ctx.fillRect(20, gy, W-40, H-gy-20);
+  ctx.fillStyle = C.ground; ctx.font = `400 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'left'; ctx.fillText('ground plane', 24, gy - 6);
+
+  // Camera position
+  const cx_ = 160, cy_ = gy - 110;  // camera centre in canvas
+
+  // Height dimension
+  ctx.strokeStyle = C.cam + '80'; ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.moveTo(cx_ - 30, gy); ctx.lineTo(cx_ - 30, cy_); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = C.cam; ctx.font = `500 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillText('h', cx_ - 34, (gy + cy_)/2 + 4);
+
+  // Camera body
+  ctx.fillStyle = C.cam + '30';
+  ctx.strokeStyle = C.cam; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(cx_ - 16, cy_ - 10, 32, 20, 4); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.cam; ctx.font = `500 9.5px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'center'; ctx.fillText('camera', cx_, cy_ - 16);
+
+  // Optical axis (horizontal)
+  ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(cx_ + 16, cy_); ctx.lineTo(W - 40, cy_); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = C.muted; ctx.font = `400 9px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'left'; ctx.fillText('horizontal', cx_ + 20, cy_ - 6);
+
+  // Mark position
+  const markX = cx_ + 180, markY = gy;
+  ctx.fillStyle = C.accent;
+  ctx.beginPath(); ctx.arc(markX, markY, 6, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = C.accent; ctx.font = `500 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'center'; ctx.fillText('ground mark', markX, markY + 18);
+
+  // D dimension
+  ctx.strokeStyle = C.accent + '60'; ctx.lineWidth = 1;
+  const dLineY = gy + 30;
+  ctx.beginPath(); ctx.moveTo(cx_, dLineY); ctx.lineTo(markX, dLineY); ctx.stroke();
+  // arrows
+  [[cx_, 1], [markX, -1]].forEach(([x, dir]) => {
+    ctx.fillStyle = C.accent;
+    ctx.beginPath(); ctx.moveTo(x, dLineY);
+    ctx.lineTo(x + dir*8, dLineY - 4); ctx.lineTo(x + dir*8, dLineY + 4);
+    ctx.closePath(); ctx.fill();
+  });
+  ctx.fillStyle = C.accent; ctx.font = `500 10px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'center'; ctx.fillText('D', (cx_ + markX)/2, dLineY + 14);
+
+  // Ray to mark (actual camera ray)
+  ctx.strokeStyle = C.vec; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx_, cy_); ctx.lineTo(markX, markY); ctx.stroke();
+
+  // Angle α (from optical axis to ray)
+  const rayAngle = Math.atan2(markY - cy_, markX - cx_);
+  ctx.strokeStyle = C.vec; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx_, cy_, 50, 0, rayAngle);
+  ctx.stroke();
+  ctx.fillStyle = C.vec; ctx.font = `500 11px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'left';
+  ctx.fillText('α', cx_ + 55, cy_ + 22);
+  ctx.fillStyle = C.muted; ctx.font = `400 9px 'IBM Plex Mono', monospace`;
+  ctx.fillText('= atan((v − cy) / fy)', cx_ + 68, cy_ + 22);
+
+  // Angle β (from horizontal down to ray)
+  ctx.strokeStyle = C.ground; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(markX, gy, 50, Math.PI + Math.atan2(cy_ - markY, cx_ - markX), Math.PI);
+  ctx.stroke();
+  ctx.fillStyle = C.ground; ctx.font = `500 11px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'left';
+  ctx.fillText('β', markX - 78, gy - 18);
+  ctx.fillStyle = C.muted; ctx.font = `400 9px 'IBM Plex Mono', monospace`;
+  ctx.fillText('= atan(h / D)', markX - 66, gy - 18);
+
+  // Pitch result
+  ctx.fillStyle = C.accent; ctx.font = `600 11px 'IBM Plex Mono', monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('θ (pitch) = β − α', W/2, 22);
+}
+
+// ── Figure 4: Roll view ──────────────────────────────────────────────────────
+function drawRollView() {
+  const [ctx, W, H] = dpr(document.getElementById('rollview-canvas'));
+  const C = tok();
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+
+  const panels = [
+    { x: 20,    label: 'No roll  (φ = 0°)',   roll: 0,    color: C.accent },
+    { x: W/2+20, label: 'With roll (φ ≠ 0°)', roll: 0.12, color: C.vec   },
+  ];
+
+  panels.forEach(({ x, label, roll, color }) => {
+    const pw = W/2 - 40, ph = H - 60;
+    const px = x, py = 30;
+
+    // Panel border
+    ctx.strokeStyle = C.border; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(px, py, pw, ph, 6); ctx.stroke();
+
+    // Image background
+    ctx.fillStyle = isDark() ? '#0D1117' : '#F8FAFC';
+    ctx.beginPath(); ctx.roundRect(px+1, py+1, pw-2, ph-2, 5); ctx.fill();
+
+    // Horizon line
+    const hy = py + ph/2;
+    ctx.strokeStyle = C.muted + '40'; ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(px+8, hy); ctx.lineTo(px+pw-8, hy); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Tape projection
+    const tcy = hy + 30;  // y of centreline (below horizon)
+    const tlx = px + 20, trx = px + pw - 20;
+    const vOff = Math.tan(roll) * (trx - tlx);
+    const tly = tcy - vOff/2, try_ = tcy + vOff/2;
+
+    ctx.strokeStyle = color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(tlx, tly); ctx.lineTo(trx, try_); ctx.stroke();
+
+    // End dots
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(tlx, tly, 5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(trx, try_, 5, 0, Math.PI*2); ctx.fill();
+
+    // Labels
+    ctx.fillStyle = color; ctx.font = `500 9.5px 'IBM Plex Mono', monospace`;
+    ctx.textAlign = 'left';  ctx.fillText('L', tlx - 16, tly + 4);
+    ctx.textAlign = 'right'; ctx.fillText('R', trx + 16, try_ + 4);
+
+    if (roll !== 0) {
+      // Δv annotation
+      const mx = (tlx + trx)/2;
+      ctx.strokeStyle = C.vec + '80'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(mx, tly); ctx.lineTo(mx, try_); ctx.stroke();
+      ctx.fillStyle = C.vec; ctx.font = `500 10px 'IBM Plex Mono', monospace`;
+      ctx.textAlign = 'left'; ctx.fillText('Δv', mx + 5, (tly+try_)/2 + 4);
+    }
+
+    // Title
+    ctx.fillStyle = color; ctx.font = `600 10px 'IBM Plex Mono', monospace`;
+    ctx.textAlign = 'center'; ctx.fillText(label, px + pw/2, py - 8);
+  });
+}
+
+function drawAll() {
+  drawOverview();
+  drawTopView();
+  drawSideView();
+  drawRollView();
+}
+
+drawAll();
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+new MutationObserver(drawAll).observe(document.documentElement, {
+  attributes: true, attributeFilter: ['data-theme']
+});
+</script>

@@ -1,0 +1,32 @@
+# ── flat_world_calibrate.py configuration ─────────────────────────────────────
+
+# Path to a saved image captured with the calibration setup in place.
+# The image must show the ground mark (and optional tape measure) as placed
+# during physical setup.  Capture it from the exact camera you are calibrating.
+image_source: /path/to/calibration_frame.jpg
+
+# Camera intrinsics YAML — ROS camera_info format (camera_matrix / distortion_coefficients)
+# or simple format with keys K (3x3 flat) and D (distortion flat).
+intrinsics_yaml: /path/to/camera_calibration.yaml
+
+# ── Physical measurements ──────────────────────────────────────────────────────
+
+# Height of the camera optical centre above the ground plane (metres).
+# Measure with a tape measure from the ground to the lens centre.
+camera_height_m: 1.20
+
+# Distance from directly below the camera to the ground mark, along the ground (metres).
+# Keep the mark on the vehicle centreline (straight ahead).
+mark_distance_m: 3.00
+
+# Width of the horizontal tape measure used for roll calibration (metres).
+# Set to 0.0 to skip roll calibration (roll will be assumed 0.0).
+tape_width_m: 2.00
+
+# Camera position relative to the vehicle reference point (usually rear axle centre).
+# These are entered manually — no clicking required.
+camera_x_offset_m: 0.50   # forward offset from reference point (metres)
+camera_y_offset_m: 0.00   # lateral offset from vehicle centreline (metres, left = positive)
+
+# ── Output ─────────────────────────────────────────────────────────────────────
+output_yaml: flat_world_extrinsic.yaml
