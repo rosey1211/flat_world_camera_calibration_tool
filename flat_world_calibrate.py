@@ -5,6 +5,8 @@ flat_world_calibrate.py
 Interactive tool to calibrate the flat-world extrinsic parameters of a camera:
   • Pitch  — downward tilt of the camera from horizontal (degrees)
   • Roll   — rotation around the optical axis (degrees, 0 = level)
+  • Yaw    — rotation about the vertical axis, i.e. camera heading error
+             relative to the vehicle's forward direction (degrees)
   • Height — camera optical centre above the ground plane (metres, entered in config)
   • X/Y offsets — camera position relative to the vehicle reference point (config)
 
@@ -13,6 +15,11 @@ Physical setup required (see INSTRUCTIONS.html in this directory):
      along the vehicle centreline.
   2. Optionally: stretch a tape measure horizontally at the same distance D,
      perpendicular to the vehicle, for roll calibration.
+
+Yaw is derived automatically from the same tape measure used for roll (its
+endpoints sit at known positions since it's centred on the vehicle centreline
+at distance D) — no extra clicks or physical setup beyond steps 1-2 above.
+It becomes available once both pitch and roll have been calibrated.
 
 Usage
 -----
@@ -41,7 +48,20 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def load_intrinsics(yaml_path: str):
+def load_intrinsics(yaml_path: str, target_width: int = None, target_height: int = None):
+    """
+    Load camera intrinsics (K, D).
+
+    If target_width/target_height are given and the yaml specifies
+    image_width/image_height (the resolution the intrinsics were actually
+    calibrated at), K is scaled to match — mirroring
+    road_centerline_node.cpp's loadAndScaleK(). Without this, fx/fy/cx/cy
+    are silently wrong whenever the calibration photo's resolution differs
+    from the intrinsics' calibration resolution — and unlike a small
+    intrinsics error, a resolution mismatch (e.g. 640x480 intrinsics used
+    against a 1920x1440 photo) produces results that are off by tens of
+    degrees, not fractions of one.
+    """
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
 
@@ -58,6 +78,26 @@ def load_intrinsics(yaml_path: str):
         D = np.array(data["D"], dtype=np.float64)
     else:
         D = np.zeros(5, dtype=np.float64)
+
+    if target_width and target_height:
+        native_w = data.get("image_width", target_width)
+        native_h = data.get("image_height", target_height)
+        if native_w != target_width or native_h != target_height:
+            sx = target_width / native_w
+            sy = target_height / native_h
+            K[0, 0] *= sx   # fx
+            K[0, 2] *= sx   # cx
+            K[1, 1] *= sy   # fy
+            K[1, 2] *= sy   # cy
+            print(f"[INFO] Scaled intrinsics from {native_w}x{native_h} "
+                  f"(calibration resolution) to {target_width}x{target_height} "
+                  f"(calibration photo resolution)")
+        elif "image_width" not in data or "image_height" not in data:
+            print(f"[WARN] {yaml_path} has no image_width/image_height — "
+                  f"cannot verify intrinsics match the photo's resolution "
+                  f"({target_width}x{target_height}). If they were "
+                  f"calibrated at a different resolution, results will be "
+                  f"badly wrong with no warning.")
 
     return K, D
 
@@ -95,21 +135,33 @@ def compute_roll(u1: float, v1: float, u2: float, v2: float) -> float:
     return math.degrees(math.atan2(v2 - v1, u2 - u1))
 
 
-def _build_rotation(pitch_deg: float, roll_deg: float) -> np.ndarray:
+def _build_rotation(pitch_deg: float, roll_deg: float, yaw_deg: float = 0.0) -> np.ndarray:
     """
     Build the combined rotation matrix: vehicle frame → camera frame.
 
     Vehicle frame: X = forward, Y = left, Z = up
     Camera frame:  X = right,  Y = down, Z = forward (OpenCV convention)
 
-    The base rotation (no pitch, no roll) aligns the two frames.
-    Pitch is then applied around camera X (tilts Z downward).
-    Roll  is applied around camera Z (tilts X downward on the right).
+    Yaw is applied first, to the vehicle-frame point — it represents camera
+    mounting error about the vehicle's vertical axis (positive = camera
+    turned toward the vehicle's left, matching the convention that positive
+    steering curvature = left turn in road_centerline_node). The base
+    rotation then aligns the frames, pitch is applied around camera X (tilts
+    Z downward), and roll around camera Z (tilts X downward on the right).
     """
     p = math.radians(pitch_deg)
     r = math.radians(roll_deg)
+    y = math.radians(yaw_deg)
 
-    # Base alignment: vehicle → camera (no pitch/roll)
+    # Yaw around the vehicle's vertical (Z-up) axis, applied to the point
+    # before anything else — see docstring above for the sign convention.
+    Ryaw = np.array([
+        [ math.cos(y), math.sin(y), 0],
+        [-math.sin(y), math.cos(y), 0],
+        [0,             0,           1],
+    ], dtype=np.float64)
+
+    # Base alignment: vehicle → camera (no pitch/roll/yaw)
     R_base = np.array([
         [ 0, -1,  0],
         [ 0,  0, -1],
@@ -130,18 +182,19 @@ def _build_rotation(pitch_deg: float, roll_deg: float) -> np.ndarray:
         [0,            0,           1],
     ], dtype=np.float64)
 
-    return Rz @ Rx @ R_base
+    return Rz @ Rx @ R_base @ Ryaw
 
 
 def project_ground_point(X_fwd: float, Y_left: float,
                           K: np.ndarray, height_m: float,
                           pitch_deg: float, roll_deg: float,
-                          x_offset: float = 0.0, y_offset: float = 0.0):
+                          x_offset: float = 0.0, y_offset: float = 0.0,
+                          yaw_deg: float = 0.0):
     """
     Project a vehicle-frame ground point (X_fwd, Y_left, Z=0) to image pixel (u, v).
     Returns (u, v) or None if the point is behind the camera.
     """
-    R = _build_rotation(pitch_deg, roll_deg)
+    R = _build_rotation(pitch_deg, roll_deg, yaw_deg)
 
     # Point relative to camera in vehicle frame: subtract camera position
     p_rel = np.array([X_fwd - x_offset, Y_left - y_offset, -height_m])
@@ -155,18 +208,77 @@ def project_ground_point(X_fwd: float, Y_left: float,
     return u, v
 
 
+def compute_pose_joint(u_p: float, v_p: float, u_l: float, v_l: float,
+                       u_r: float, v_r: float, X_fwd: float, half_width: float,
+                       K: np.ndarray, height_m: float,
+                       x_offset: float = 0.0, y_offset: float = 0.0,
+                       pitch_init: float = 0.0, roll_init: float = 0.0,
+                       yaw_init: float = 0.0, pitch_span: float = 6.0,
+                       roll_span: float = 20.0, yaw_span: float = 20.0):
+    """
+    Jointly solve pitch, roll, and yaw from all three reference clicks (the
+    ground mark plus both tape endpoints — 3 known vehicle-frame points, 6
+    observed pixel coordinates), minimizing total squared reprojection error.
+
+    Pitch, roll, and yaw are NOT independent — each reference point's
+    projected position depends on all three together, so solving them one
+    at a time via separate closed forms (pitch from the mark, then roll from
+    the tape, then yaw from the tape given that roll) compounds error: pitch
+    computed while ignoring unknown roll/yaw is already biased once either
+    is non-negligible, and that bias then propagates into roll and yaw too.
+    This instead does a dependency-free coarse-to-fine grid search over all
+    three angles jointly — exact (up to grid resolution), no small-angle
+    assumptions, seeded from the cheap closed-form estimates for speed.
+
+    Returns (pitch_deg, roll_deg, yaw_deg).
+    """
+    points = [(X_fwd, 0.0,         u_p, v_p),
+              (X_fwd,  half_width, u_l, v_l),
+              (X_fwd, -half_width, u_r, v_r)]
+
+    def residual(pitch_deg, roll_deg, yaw_deg):
+        total = 0.0
+        for X, Y, uc, vc in points:
+            p = project_ground_point(X, Y, K, height_m, pitch_deg, roll_deg,
+                                     x_offset, y_offset, yaw_deg)
+            if p is None:
+                return float("inf")
+            total += (p[0] - uc) ** 2 + (p[1] - vc) ** 2
+        return total
+
+    pc, rc, yc = pitch_init, roll_init, yaw_init
+    ps, rs, ys = pitch_span, roll_span, yaw_span
+    for _ in range(10):
+        best = (pc, rc, yc, residual(pc, rc, yc))
+        for dp in np.linspace(-ps, ps, 7):
+            for dr in np.linspace(-rs, rs, 7):
+                for dy in np.linspace(-ys, ys, 7):
+                    e = residual(pc + dp, rc + dr, yc + dy)
+                    if e < best[3]:
+                        best = (pc + dp, rc + dr, yc + dy, e)
+        pc, rc, yc, _ = best
+        ps, rs, ys = ps / 3.0, rs / 3.0, ys / 3.0
+    return pc, rc, yc
+
+
 def build_verification_grid(K, height_m, pitch_deg, roll_deg,
-                              x_offset, y_offset, img_shape):
+                              x_offset, y_offset, img_shape, yaw_deg=0.0):
     """
     Return a list of (u, v, dist_m, lat_m) for a ground grid.
     Used to visually verify the calibration.
+
+    dist is distance from the CAMERA (matching mark_distance_m's documented
+    meaning and how pitch/roll/yaw are actually solved in _refine_pose), so
+    it must be converted to vehicle-frame X_fwd the same way: + x_offset.
+    Without this, the grid's own "mark" point doesn't line up with the
+    actual clicked mark whenever x_offset != 0.
     """
     h, w = img_shape[:2]
     pts = []
     for dist in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
         for lat in [-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]:
-            r = project_ground_point(dist, lat, K, height_m, pitch_deg, roll_deg,
-                                     x_offset, y_offset)
+            r = project_ground_point(x_offset + dist, lat, K, height_m, pitch_deg,
+                                     roll_deg, x_offset, y_offset, yaw_deg)
             if r is None:
                 continue
             u, v = r
@@ -190,12 +302,18 @@ class CalibrationTool:
 
         self.height_m    = float(cfg.get("camera_height_m",  1.0))
         self.mark_dist_m = float(cfg.get("mark_distance_m",  3.0))
+        self.tape_width_m = float(cfg.get("tape_width_m",    0.0))
         self.x_offset    = float(cfg.get("camera_x_offset_m", 0.0))
         self.y_offset    = float(cfg.get("camera_y_offset_m", 0.0))
         self.output_path = cfg.get("output_yaml", "flat_world_extrinsic.yaml")
 
         self.fx, self.fy = K[0, 0], K[1, 1]
         self.cx, self.cy = K[0, 2], K[1, 2]
+
+        # Status bar height (see _draw) — the displayed window is
+        # vstack([bar, canvas]), so this offset must be subtracted from click
+        # y-coordinates to convert them back into image (canvas) coordinates.
+        self.bar_h = max(56, round(0.13 * self.orig.shape[0]))
 
         self.undistort   = False
         self.show_grid   = False
@@ -207,6 +325,7 @@ class CalibrationTool:
 
         self.pitch_deg   = None
         self.roll_deg    = 0.0
+        self.yaw_deg     = 0.0
 
         self.win = "Flat-World Camera Calibration"
         cv2.namedWindow(self.win, cv2.WINDOW_NORMAL)
@@ -214,14 +333,64 @@ class CalibrationTool:
 
     # ── Mouse ──────────────────────────────────────────────────────────────────
 
+    def _refine_pose(self):
+        """
+        Jointly refine pitch, roll, and yaw once the ground mark and both
+        tape endpoints have all been clicked. See compute_pose_joint for why
+        this joint solve is needed instead of the separate closed forms
+        alone — pitch, roll, and yaw each bias the others' naive per-click
+        estimates once any of them is non-negligible. The tape is centred on
+        the vehicle centreline at the same distance as the pitch mark, so
+        its endpoints sit at known vehicle-frame positions
+        (mark_dist_m, +/-tape_width_m/2, 0) — no separate physical setup or
+        click is needed beyond what pitch/roll calibration already collect.
+
+        Overwrites self.pitch_deg/roll_deg (previously set from the cheap
+        closed forms, which stay in effect until tape data is available)
+        and sets self.yaw_deg.
+        """
+        if self.pitch_click is None or not (self.roll_l and self.roll_r):
+            return
+        if self.tape_width_m <= 0.0:
+            print("  [INFO] tape_width_m is 0 in config — cannot refine "
+                  "roll/yaw without a known tape width.")
+            return
+
+        half = self.tape_width_m / 2.0
+        # The mark/tape are mark_dist_m FROM THE CAMERA, so their vehicle-frame
+        # forward position also includes the camera's own offset from the
+        # vehicle reference point.
+        X_fwd = self.x_offset + self.mark_dist_m
+
+        pitch_seed = compute_pitch(self.pitch_click[1], self.cy, self.fy,
+                                   self.height_m, self.mark_dist_m)
+        roll_seed  = compute_roll(*self.roll_l, *self.roll_r)
+
+        self.pitch_deg, self.roll_deg, self.yaw_deg = compute_pose_joint(
+            self.pitch_click[0], self.pitch_click[1],
+            self.roll_l[0], self.roll_l[1],
+            self.roll_r[0], self.roll_r[1],
+            X_fwd, half, self.K, self.height_m,
+            self.x_offset, self.y_offset,
+            pitch_init=pitch_seed, roll_init=roll_seed, yaw_init=0.0)
+
+        print(f"  Refined pose → pitch={self.pitch_deg:.3f}°  "
+              f"roll={self.roll_deg:.3f}°  yaw={self.yaw_deg:.3f}°")
+
     def _on_mouse(self, event, x, y, flags, param):
         if event != cv2.EVENT_LBUTTONDOWN:
             return
+        # The window shows vstack([bar, canvas]), so clicks arrive in that
+        # combined coordinate space — convert back to image (canvas) space.
+        y -= self.bar_h
+        if y < 0:
+            return   # click landed on the status bar, not the image
         if self.mode == self.MODE_PITCH:
             self.pitch_click = (x, y)
             self.pitch_deg = compute_pitch(y, self.cy, self.fy,
                                            self.height_m, self.mark_dist_m)
             print(f"  Pitch mark clicked at ({x}, {y})  →  pitch = {self.pitch_deg:.3f} °")
+            self._refine_pose()
         elif self.mode == self.MODE_ROLL_L:
             self.roll_l = (x, y)
             print(f"  Left tape end: ({x}, {y})")
@@ -234,6 +403,7 @@ class CalibrationTool:
                 self.roll_deg = compute_roll(*self.roll_l, *self.roll_r)
                 print(f"  Roll = {self.roll_deg:.3f} °")
             self.mode = self.MODE_PITCH
+            self._refine_pose()
 
     # ── Drawing ────────────────────────────────────────────────────────────────
 
@@ -255,7 +425,7 @@ class CalibrationTool:
         if self.show_grid and self.pitch_deg is not None:
             grid = build_verification_grid(self.K, self.height_m, self.pitch_deg,
                                            self.roll_deg, self.x_offset, self.y_offset,
-                                           canvas.shape)
+                                           canvas.shape, self.yaw_deg)
             for u, v, dist, lat in grid:
                 is_mark = abs(dist - self.mark_dist_m) < 0.1 and abs(lat) < 0.1
                 color = (0, 255, 160) if is_mark else (180, 180, 100)
@@ -290,13 +460,13 @@ class CalibrationTool:
                      (0, 200, 255), lw, cv2.LINE_AA)
 
         # ── Status bar ────────────────────────────────────────────────────────
-        bar_h = max(56, round(0.13 * h))
+        bar_h = self.bar_h
         bar   = np.zeros((bar_h, w, 3), dtype=np.uint8)
         bar[:] = (25, 28, 38)
 
         pitch_str = (f"Pitch: {self.pitch_deg:+.3f} deg"
                      if self.pitch_deg is not None else "Pitch: (click the ground mark)")
-        roll_str  = f"Roll:  {self.roll_deg:+.3f} deg"
+        roll_str  = f"Roll:  {self.roll_deg:+.3f} deg     Yaw: {self.yaw_deg:+.3f} deg"
 
         mode_color = {
             self.MODE_PITCH:  (100, 255, 140),
@@ -336,6 +506,7 @@ class CalibrationTool:
             "camera_height_m":   round(self.height_m,    4),
             "camera_pitch_deg":  round(self.pitch_deg,   4),
             "camera_roll_deg":   round(self.roll_deg,    4),
+            "camera_yaw_deg":    round(self.yaw_deg,     4),
             "camera_x_offset_m": round(self.x_offset,   4),
             "camera_y_offset_m": round(self.y_offset,   4),
         }
@@ -406,16 +577,6 @@ def main():
 
     cfg = load_config(args.config)
 
-    intrinsics_path = cfg.get("intrinsics_yaml", "")
-    if not intrinsics_path or not os.path.exists(intrinsics_path):
-        print(f"[ERROR] intrinsics_yaml not found: {intrinsics_path!r}")
-        print("        Set intrinsics_yaml in calibration_config.yaml.")
-        sys.exit(1)
-
-    K, D = load_intrinsics(intrinsics_path)
-    print(f"Intrinsics:  fx={K[0,0]:.1f}  fy={K[1,1]:.1f}  "
-          f"cx={K[0,2]:.1f}  cy={K[1,2]:.1f}")
-
     image_path = args.image or cfg.get("image_source", "")
     if not image_path or not os.path.exists(image_path):
         print(f"[ERROR] Image not found: {image_path!r}")
@@ -428,6 +589,19 @@ def main():
         sys.exit(1)
 
     print(f"Image:       {image_path}  ({image.shape[1]}×{image.shape[0]})")
+
+    intrinsics_path = cfg.get("intrinsics_yaml", "")
+    if not intrinsics_path or not os.path.exists(intrinsics_path):
+        print(f"[ERROR] intrinsics_yaml not found: {intrinsics_path!r}")
+        print("        Set intrinsics_yaml in calibration_config.yaml.")
+        sys.exit(1)
+
+    # Scale intrinsics to the calibration photo's resolution — see
+    # load_intrinsics docstring for why this matters (a resolution mismatch
+    # is far more damaging than an ordinary intrinsics error).
+    K, D = load_intrinsics(intrinsics_path, image.shape[1], image.shape[0])
+    print(f"Intrinsics:  fx={K[0,0]:.1f}  fy={K[1,1]:.1f}  "
+          f"cx={K[0,2]:.1f}  cy={K[1,2]:.1f}")
 
     CalibrationTool(image, K, D, cfg).run()
 
